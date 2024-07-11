@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EnviroGuard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH" crossorigin="anonymous">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+            display: none; /* Initially hide the table */
+        }
+        table, th, td {
+            border: 1px solid #ddd;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+        }
+        th {
+            background-color: #0074D9; /* Blue color */
+            color: white;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        /* Apply color coding based on mq135_analog_value */
+        td[data-range="low"] {
+            color: black;
+        }
+        td[data-range="medium"] {
+            color: orange;
+        }
+        td[data-range="high"] {
+            color: red;
+        }
+        .chart-container {
+            width: 100%;
+            margin-bottom: 20px;
+        }
+        .averages {
+            margin-bottom: 10px;
+        }
+        .average-item {
+            padding: 20px;
+            background-color: #e9ecef;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+        .nav-item {
+            margin-top: 10px;
+            margin-left: 15px;
+        }
+        .status-safe {
+            color: green;
+        }
+        .status-moderate {
+            color: orange;
+        }
+        .status-danger {
+            color: red;
+        }
+        .average-status {
+            background-color: #e9ecef;
+            border-radius: 5px;
+            margin-left: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+        .motion-detected {
+            color: red;
+        }
+        .no-motion {
+            color: green;
+        }
+    </style>
+</head>
+<body>
+    
+    <nav class="navbar navbar-expand-lg bg-body-tertiary">
+        <div class="container-fluid">
+            <h1>EnviroGuard</h1>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarTogglerDemo01" aria-controls="navbarTogglerDemo01" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span> 
+          </button>
+          <div class="collapse navbar-collapse" id="navbarTogglerDemo01">
+            <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+              <li class="nav-item">
+                <a class="nav-link active" aria-current="page" href="#" id="home-link">Line Graphs</a>
+              </li>
+              <li class="nav-item">
+                <a class="nav-link active" aria-current="page" href="#" id="table-link">Table</a>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </nav>
+
+      <div id="averages-container" class="averages">
+        <div class="average-item">
+            <span>Current Motion Status: </span><span id="motion-status"></span>
+        </div>
+        <div class="average-item">
+            <span>Average Air Quality (PPM): </span><span id="avg-mq135"></span>
+            <div class="average-status">
+                <span>Status: </span><span id="mq135-status"></span>
+            </div>
+        </div>
+        <div class="average-item">
+            <span>Average Temperature (°C): </span><span id="avg-temp"></span>
+        </div>
+        <div class="average-item">
+            <span>Average Humidity (%): </span><span id="avg-humd"></span>
+        </div>
+    </div>
+      
+    <div id="filter-container" style="display: none;">
+        <label for="ir-filter">Motion => </label>
+        <select id="ir-filter">
+            <option value="all">All</option>
+            <option value="1">Motion Detected</option>
+            <option value="0">No Motion Detected</option>
+        </select>
+        <label for="mq135-filter">Air Quality => </label>
+        <select id="mq135-filter">
+            <option value="all">All</option>
+            <option value="low">Low (&lt; 300)</option>
+            <option value="medium">Moderate (300 - 600)</option>
+            <option value="high">High (&gt; 600)</option>
+        </select>
+    </div>
+    <table class="table table-striped" id="data-table-container">
+        <thead>
+            <tr>
+                <th>Timestamp</th>
+                <th>Motion (1=motion detected, 0=motion not detected)</th>
+                <th>Air Quality (PPM)</th>
+                <th>Temperature (Celcius)</th>
+                <th>Humidity (%)</th>
+            </tr>
+        </thead>
+        <tbody id="data-table">
+        </tbody>
+    </table>
+
+    <div id="charts-container" style="display: none;">
+        <div class="chart-container">
+            <canvas id="irChart"></canvas>
+        </div>
+        <div class="chart-container">
+            <canvas id="mq135Chart"></canvas>
+        </div>
+        <div class="chart-container">
+            <canvas id="tempChart"></canvas>
+        </div>
+        <div class="chart-container">
+            <canvas id="humidityChart"></canvas>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            const irFilter = document.getElementById('ir-filter');
+            const mq135Filter = document.getElementById('mq135-filter');
+            let sensorData = [];
+            let irChart, mq135Chart, tempChart, humidityChart;
+
+            function fetchData() {
+                fetch('fetchdata.php')
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        sensorData = data;
+                        renderTable(sensorData);
+                        updateCharts(sensorData);
+                    })
+                    .catch(error => {
+                        console.error('Error fetching data:', error);
+                    });
+            }
+
+            function fetchAverages() {
+                fetch('fetch_latest_data.php')
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        const averages = data.averages;
+                        document.getElementById('avg-mq135').textContent = averages.avg_mq135_analog_value.toFixed(2);
+                        document.getElementById('avg-temp').textContent = averages.avg_dht22_temp.toFixed(2);
+                        document.getElementById('avg-humd').textContent = averages.avg_dht22_humd.toFixed(2);
+                        
+                        const mq135StatusElement = document.getElementById('mq135-status');
+                        if (averages.avg_mq135_analog_value <= 300) {
+                            mq135StatusElement.textContent = 'Safe';
+                            mq135StatusElement.className = 'status-safe';
+                        } else if (averages.avg_mq135_analog_value >=301 && averages.avg_mq135_analog_value <= 549) {
+                            mq135StatusElement.textContent = 'Moderate';
+                            mq135StatusElement.className = 'status-moderate';
+                        } else if (averages.avg_mq135_analog_value >=550 && averages.avg_mq135_analog_value <= 599) {
+                            mq135StatusElement.textContent = 'Danger!';
+                            mq135StatusElement.className = 'status-moderate';
+                            alert('Warning: Average Air Quality is above 550! Please check your house before it enters 600.');
+                        } else {
+                            mq135StatusElement.textContent = 'Hazardous!';
+                            mq135StatusElement.className = 'status-danger';
+                            alert('Warning: Average Air Quality is above 600! Please check your house or move out NOW!');
+                        }
+                        
+                        const motionStatusElement = document.getElementById('motion-status');
+                        if (averages.latest_motion_value == 1) {
+                            motionStatusElement.textContent = 'Motion detected';
+                            motionStatusElement.className = 'motion-detected';
+                        } else {
+                            motionStatusElement.textContent = 'No Motion detected';
+                            motionStatusElement.className = 'no-motion';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching averages:', error);
+                    });
+            }
+
+            function renderTable(data) {
+                const tbody = document.getElementById('data-table');
+                tbody.innerHTML = '';
+                data.forEach(row => {
+                    const tr = document.createElement('tr');
+                    const irRange = row.mq135_analog_value < 300 ? 'low' : (row.mq135_analog_value < 600 ? 'medium' : 'high');
+                    tr.innerHTML = `
+                        <td>${row.timestamp}</td>
+                        <td>${row.ir_value}</td>
+                        <td data-range="${irRange}">${row.mq135_analog_value}</td>
+                        <td>${row.dht22_temp}</td>
+                        <td>${row.dht22_humd}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+
+            function updateCharts(data) {
+                const timestamps = data.map(row => row.timestamp);
+                const irValues = data.map(row => row.ir_value);
+                const mq135Values = data.map(row => row.mq135_analog_value);
+                const tempValues = data.map(row => row.dht22_temp);
+                const humidityValues = data.map(row => row.dht22_humd);
+
+                if (!irChart) {
+                    const ctxIr = document.getElementById('irChart').getContext('2d');
+                    irChart = new Chart(ctxIr, {
+                        type: 'line',
+                        data: {
+                            labels: timestamps,
+                            datasets: [{
+                                label: 'Motion (1=motion detected, 0=motion not detected)',
+                                data: irValues,
+                                borderColor: 'rgba(255, 99, 132, 1)',
+                                backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                                fill: false
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            scales: {
+                                x: {
+                                    display: true,
+                                    title: {
+                                        display: true,
+                                        text: 'Timestamp'
+                                    }
+                                },
+                                y: {
+                                    display: true,
+                                    title: {
+                                        display: true,
+                                        text: 'Motion'
+                                    }
+                                }
+                            }
+                        }
+                    });
+                } else {
+                    irChart.data.labels = timestamps;
+                    irChart.data.datasets[0].data = irValues;
+                    irChart.update();
+                }
+
+                if (!mq135Chart) {
+                    const ctxMq135 = document.getElementById('mq135Chart').getContext('2d');
+                    mq135Chart = new Chart(ctxMq135, {
+                        type: 'line',
+                        data: {
+                            labels: timestamps,
+                            datasets: [{
+                                label: 'Air Quality (PPM)',
+                                data: mq135Values,
+                                borderColor: 'rgba(54, 162, 235, 1)',
+                                backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                                fill: false
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            scales: {
+                                x: {
+                                    display: true,
+                                    title: {
+                                        display: true,
+                                        text: 'Timestamp'
+                                    }
+                                },
+                                y: {
+                                    display: true,
+                                    title: {
+                                        display: true,
+                                        text: 'Air Quality (PPM)'
+                                    }
+                                }
+                            }
+                        }
+                    });
+                } else {
+                    mq135Chart.data.labels = timestamps;
+                    mq135Chart.data.datasets[0].data = mq135Values;
+                    mq135Chart.update();
+                }
+
+                if (!tempChart) {
+                    const ctxTemp = document.getElementById('tempChart').getContext('2d');
+                    tempChart = new Chart(ctxTemp, {
+                        type: 'line',
+                        data: {
+                            labels: timestamps,
+                            datasets: [{
+                                label: 'Temperature (°C)',
+                                data: tempValues,
+                                borderColor: 'rgba(75, 192, 192, 1)',
+                                backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                                fill: false
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            scales: {
+                                x: {
+                                    display: true,
+                                    title: {
+                                        display: true,
+                                        text: 'Timestamp'
+                                    }
+                                },
+                                y: {
+                                    display: true,
+                                    title: {
+                                        display: true,
+                                        text: 'Temperature (°C)'
+                                    }
+                                }
+                            }
+                        }
+                    });
+                } else {
+                    tempChart.data.labels = timestamps;
+                    tempChart.data.datasets[0].data = tempValues;
+                    tempChart.update();
+                }
+
+                if (!humidityChart) {
+                    const ctxHumidity = document.getElementById('humidityChart').getContext('2d');
+                    humidityChart = new Chart(ctxHumidity, {
+                        type: 'line',
+                        data: {
+                            labels: timestamps,
+                            datasets: [{
+                                label: 'Humidity (%)',
+                                data: humidityValues,
+                                borderColor: 'rgba(153, 102, 255, 1)',
+                                backgroundColor: 'rgba(153, 102, 255, 0.2)',
+                                fill: false
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            scales: {
+                                x: {
+                                    display: true,
+                                    title: {
+                                        display: true,
+                                        text: 'Timestamp'
+                                    }
+                                },
+                                y: {
+                                    display: true,
+                                    title: {
+                                        display: true,
+                                        text: 'Humidity (%)'
+                                    }
+                                }
+                            }
+                        }
+                    });
+                } else {
+                    humidityChart.data.labels = timestamps;
+                    humidityChart.data.datasets[0].data = humidityValues;
+                    humidityChart.update();
+                }
+            }
+
+            irFilter.addEventListener('change', function() {
+                const selectedValue = irFilter.value;
+                const filteredData = selectedValue === 'all' ? sensorData : sensorData.filter(row => row.ir_value === parseInt(selectedValue));
+                renderTable(filteredData);
+                updateCharts(filteredData);
+            });
+
+            mq135Filter.addEventListener('change', function() {
+                const selectedValue = mq135Filter.value;
+                let filteredData;
+                if (selectedValue === 'all') {
+                    filteredData = sensorData;
+                } else {
+                    filteredData = sensorData.filter(row => {
+                        if (selectedValue === 'low') return row.mq135_analog_value < 300;
+                        if (selectedValue === 'medium') return row.mq135_analog_value >= 300 && row.mq135_analog_value < 600;
+                        if (selectedValue === 'high') return row.mq135_analog_value >= 600;
+                    });
+                }
+                renderTable(filteredData);
+                updateCharts(filteredData);
+            });
+
+            document.getElementById('home-link').addEventListener('click', function() {
+                document.getElementById('charts-container').style.display = 'block';
+                document.getElementById('filter-container').style.display = 'none';
+                document.getElementById('data-table-container').style.display = 'none';
+            });
+
+            document.getElementById('table-link').addEventListener('click', function() {
+                document.getElementById('charts-container').style.display = 'none';
+                document.getElementById('filter-container').style.display = 'block';
+                document.getElementById('data-table-container').style.display = 'table';
+            });
+
+            fetchData();
+            fetchAverages();
+            setInterval(fetchData, 5000);
+            setInterval(fetchAverages, 5000);
+        });
+    </script>
+</body>
+</html>
